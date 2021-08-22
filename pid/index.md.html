@@ -1,0 +1,442 @@
+<meta charset="utf-8" emacsmode="-*- markdown -*-">
+
+_Last updated:_ August 21, 2021.
+
+When asked what the workhorse of control theory is in industrial
+practice today, many a control engineer will no doubt answer "PID."
+[^pidAbbrev] Here we shed some light on what exactly constitutes a PID
+controller, and how one is to implement such a controller in practice.
+In this regard, we go beyond simply backward difference and Euler
+integration, but instead show how we can more closely approximate a
+continuous-time PID controller implemented on a sampled-data system.
+
+## Controller Architecture
+
+As the name suggests, a PID controller consist of three parts:
+1. A proportional part (denoted by $P(t)$);
+2. An integral part (denoted by $I(t)$); and
+3. A derivative part (denoted by $D(t)$).
+
+We discuss each part separately, after studying the input to the PID
+controller. Throughout this discussion, the reader is referred
+to Fig. [pidDiagram] to see how the different elements slot together.
+
+***********************************************************************************
+*
+*                               .-----------. P(t)
+*                           .-->| Kp × ·    +---------.
+*                          |    '-----------'          |
+*                          |                         + v
+*           +  .-. e(t)    |    .-----------. I(t)  + .-. u(t)  .-------. y(t)
+* r(t) *----->| Σ +--------o--->| Ki ∫ · dt +------->| Σ +----->| Plant +---+--->*
+*              '-'         |    '-----------'         '-'       '-------'   |
+*             - ^          |                         + ^                    |
+*               |          |    .-----------. D(t)     |                    |
+*               |           '-->| Kp  d·/dt +---------'                     |
+*               |               '-----------'                               |
+*                '---------------------------------------------------------'
+*
+***********************************************************************************
+[Figure [pidDiagram]: Illustration of a classical PID controller.]
+
+### Regulators vs. Tracking Controllers
+
+A PID controller is in its raw form is a _regulator_: it serves to drive
+whatever signal is input to zero by exerting a computed control action
+onto the plant (or system). In practice, we often wish to _track_ a
+given _reference signal_, which we denote by $r(t)$. To express a
+tracking problem as a regulation problem, it suffices to apply the
+following transformation[^trackingCaveat]:
+
+\begin{equation}\label{eq:error definition}
+    e(t) = r(t) - y(t),
+\end{equation}
+where $e(t)$ is the error that we wish to regulate, and $y(t)$ is the
+plant output (which we wish to track $r(t)$).
+
+!!! Tip
+    **Error vs. Deviation**
+    
+    In $\eqref{eq:error definition}$, $e(t)$ is defined as the
+    (tracking) _error_; it express how much the plant deviates from the
+    reference signal. It is interesting to note that some authors
+    assign a separate name to the negative counterpart of the
+    error---the (tracking) _deviation_---often denoted by $d(t) = -e(t)$
+    (see, e.g., [#Grabbe58] (p. 19-05)). For some systems, the
+    difference between these two definitions can be of importance.
+
+    Imagine a system for which a positive value of $u(t)$ is required
+    to regulate a _positive_ value of $e(t)$. An example of such a
+    system is an airplane; when a pilot wishes to push the nose down,
+    they must apply a forward (positive) yoke pressure to do so. In such
+    cases it can be beneficial to instead work with $d(t)$ as the input
+    to the PID controller, since we would otherwise have to change
+    the sign of all tuning parameters ($K_p, K_i, K_d$).
+
+    As a general comment, it would do one good to stick with one
+    definition of $e(t)$, and instead accept that in some cases negative
+    tuning parameters may be encountered. A deeper understanding of the
+    underlying plant dynamics will often provide closure when dealing
+    with negative tuning parameters (as was the case in the airplane
+    example).
+
+### Elements of a PID Controller
+
+We now consider the purpose of the various elements of a PID controller.
+As can clearly be seen, there are three principle "tuning knobs" to this
+controller:
+
+1. The proportional gain $K_p$;
+2. The integral gain $K_i$; and
+3. The derivative gain $K_d$.
+
+We study each element in some detail.
+
+#### Proportional Controller
+
+The simplest of the three constitutive controllers is the
+proportional controller. Its premise is simple: the control input
+magnitude increases with the magnitude error, scaled by gain $K_p$. 
+
+Fig. [pController] illustrates that the control input is proportional to
+the tracking _error_ (here, $K_p = 1$). It is more intuitive to reason
+in terms of the tracking _deviation_ (in the case of $K_p > 0$):
+when $y(t) > r(t)$ (i.e., $d(t) > 0$), a negative value of $u(t)$ is
+returned, and vice versa.
+
+***********************
+*              /      *
+*             +       *
+*     u  ▲   /^       *
+*        ┊  / |       *
+*        ┊ /  | u(t)  *
+*        ┊/   |       *
+* ┄┄┄┄┄┄┄o┄┄┄┄+┄┄▶ e  *
+*       /┊<-->┊       *
+*      / ┊   e(t)     *
+*     /  ┊            *
+*    /   ┊            *
+*   /                 *
+***********************
+[Figure [pController]: Illustration of the control action of a P controller.]
+    
+
+(#####) Drawbacks and Considerations
+
+Why would one not adopt a P controller and call it a job well done? In
+practice, P controllers can be too aggressive during the initial stages,
+when the magnitude of $e(t)$. In most systems, this results in inherent
+_actuator saturation_, but even this can be damaging to the plant itself.
+Perhaps more importantly, a _sharp rise in control input_ can induce
+significant damage to the system and actuators alike
+(much like slamming the brakes of an automobile when driving on the
+freeway). 
+
+Actuators in real-life also suffer from inherent _biases_, which can
+shift a commanded input $u(t)$ to a different value when applied. In
+practice this is most noticeable when $e(t)$ is close to zero, and
+$u(t) = K_p e(t)$ is small. In such regions, the presence of actuator
+introduces a _steady-state error_ $e_{\text{ss}}$, which is maintained
+despite the application of a nonzero control input. A possible
+mitigation strategy here is to introduce a bias correction, which models
+the bias as part of a control allocation algorithm. This does, however,
+require significant knowledge of the system and actuator dynamics, and
+may not be a silver bullet: wear and tear encountered during a system's
+operating cycles can make for time-varying biases that can hardly be 
+captured prior to operation.
+
+Last, but certainly not least, are
+_high-frequency actuator oscillations_ induced by P controllers. When
+$e(t)$ is sufficiently close to zero, even the slightest control input
+can change its sign, thereby spurring yet another control input of
+opposite sign (see Fig. [pControllerOscillation]). This "ping-pong"-like
+actuation behavior can be extremely taxing on the actuators (as
+unnecessary control effort is expended at very high slew rates), and can
+damage the plant as well. Consider a stabilizing platform for some
+highly sensitive scientific equipment. Despite a desire to keep the
+platform level, high frequency oscillations can quickly contaminate the
+measurements despite the platform appearing close to level to a distant
+observer.
+
+****************************
+*              /           *
+*             +            *
+*     u  ▲   /^            *
+*        ┊  / |            *
+*        ┊ /^ | u(t)       *
+*        ┊/^| |            *
+* ┄┄+┄++┄o┄++┄+┄┄▶ e       *
+*   | |v/  ┊┊ ┊            *
+*   | v/   ┊┊ ┊            *
+*   | /┊   ┊┊ ┊            *
+*   v/┊┊   ┊┊ ┊            *
+*   + ┊┊   ┊┊ ┊            *
+*   ┊ ┊┊   ┊┊ ┊
+*   ┊ ┊┊   ┊┊ ┊
+*   ┊ ┊┊   ┊┊ ┊          t
+*   |<---------     t0   *
+*   +------>|       t1   |
+*       .<--'       t2   |
+*       +->.        t3   |
+*        <-+        t4   v
+*         ⋮
+****************************
+[Figure [pControllerOscillation]: Illustration of oscillatory actuation action of a P controller when $e(t)$ is near the origin.]
+
+This latter problem can be mitigated to some extent by introducing a
+_deadband_. Within a neighborhood of $u = 0$, $u(t)$ will "snap back" to
+zero. This is useful in practice, but has the undesirable effect that
+the control input value will jump from zero to some nonzero value in a
+nonsmooth manner, which may introduce problems of its own. This can be
+mitigated by introducing a bias parameter, but this is not guaranteed to
+yield satisfactory results. Instead, one should start looking at a PI
+controller instead.
+
+Summarizing, we have mentioned:
+- Excessive initial actuation magnitudes and actuator saturation;
+- Steady-state errors;
+- High-frequency oscillations.
+
+#### Integral Controller
+
+The integral controller makes up for many of the deficiencies of the
+proportional controller. For one, the integral action of the I
+controller allows it to work past actuator biases, since it will keep
+increasing (or decreasing) the control input so long as an error exists.
+This already rids us of the steady-state error in most cases.
+
+(#####) Drawbacks and Considerations
+
+Since integral action encapsulates past knowledge of the error, I
+controllers are more cautious when starting up (i.e., when the integral
+value is small). At the same time, I controllers are much more
+"impressionable;" significant events that occurred in the past
+(e.g., large sustained error) can resonate long into the future, and may
+take a significant amount of time to get neutralized
+(fortunately often without overshoot).
+
+Because I controllers take some time to "warm up," they often lack
+the initial aggressiveness seen in P controllers. This makes it sensible
+to couple the two together in practice (such an arrangement gives rise
+to a PI controller).
+
+In practice controllers often have actuation limits that are enforced
+by some control allocation algorithm. Naturally, an I controller has
+no knowledge of these limits. If we were to attempt to reach a state for
+which control effort beyond that allowed by the saturation limits is
+required, we would be met with some sort of "steady-state" error that
+will not vanish. This will result in a monotonic increase in the
+magnitude of $I(t)$. Now let's say that after some time we change our
+mind and want to  return to a state that we previously found was
+reachable (observing the actuation limits). The magnitude of $I$ will be
+so large that it will take a significant amount of time for the new
+error value to "neutralize" the integral value. This phenomenon is known
+as _integral windup_, and can be particularly insidious when ignored
+during the design phase.
+
+!!! Tip
+    **Mitigating Integral Windup**
+
+    There are a number of easy stop-gap measures to circumvent the
+    problem of integral windup. The easiest of these would be to 
+    saturate the integral value itself during each update. This is known
+    as integration with projection. In essence, any update in $I$ will
+    be constrained to lie in some interval
+    $[I_{\text{min}}, I_{\text{max}}]$, so as to ensure that any future
+    changes in $e$ will reasonably quickly appear in $I$.
+
+    Another solution is to periodically "dump" (reset) the integral
+    value. This can cause unintended harm, however, as the control
+    input will suddenly jump.
+
+Summarizing, we have mentioned the following drawbacks:
+    - Smoother but slower startup;
+    - Persistence of memory of past events;
+    - Integral windup.
+
+#### Derivative Controller
+
+The derivative controller is a little more arcane in that its effects
+are harder to grasp; what exactly does the derivative of the error tell
+us about the process? Since the derivative is instantaneous, it tells us
+something about the current trend of the error. With this in mind, we
+can think of it as allowing us to "ease in" future changes. In essence,
+we can counteract tendencies of current control input of sharply
+increasing (or decreasing) the error when it starts showing signs of
+slowing down.
+
+To illustrate this, consider an '∫'-shaped function. Towards the left
+end, the signal will have a positive derivative, which is strengthened
+by a D controller. On the other hand, toward the end of the curve, the
+derivative will be negative, which leads to the D controller easing out
+the rising action. In this sense, a D controller "amplifies" trends in
+the control signal, but it is hard to tell if this amplification will
+be conducive to a better controller design up front.
+
+(#####) Drawbacks and Considerations
+
+While it is often said that the introduction of a derivative controller
+leads to a reduction in settling time and overshoot, it is hard to say
+beforehand for which values of $K_d$ this will be the case. For a
+process with large gradients, it can be envisioned that this introduces
+oscillations and instabilities instead, so care must be taken when
+working with derivative controllers.
+
+### Further Reading
+
+!!! 
+    **Laplace Domain**
+
+    We can conveniently work in the Laplace domain under the assumption that
+    our plant is _linear_. We denote our plant's transfer function by
+    $H(s)$. The block diagram in Fig. [pidDiagram] can then be expressed as
+    in Fig. [pidDiagramLaplace].
+
+    We can then easily obtain the key transfer functions as follows:
+    \begin{align}
+        \frac{U(s)}{E(s)} &= K_p + K_i \frac{1}{s} + K_d s =: G(s), \\
+        \frac{E(s)}{R(s)} &= \frac{1}{1 + G(s) H(s)}, \\
+        \frac{U(s)}{R(s)} &= \frac{U(s)}{E(s)} \frac{E(s)}{R(s)} = \frac{G(s)}{1 + G(s) H(s)}, \\
+        \frac{U(s)}{Y(s)} &= \frac{U(s)}{R(s)} \frac{Y(s)}{U(s)} = \frac{G(s) H(s)}{1 + G(s) H(s)}.
+    \end{align}
+
+***********************************************************************************
+*
+*                               .--------.
+*                           .-->| Kp     +---------.
+*                          |    '--------'          |
+*                          |                      + v         Plant
+*           +  .-. E(s)    |    .--------.      +  .-. U(s)  .------. Y(s)
+* R(s) *----->| Σ +--------o--->| Ki / s +------->| Σ +----->| H(s) +---+--->*
+*              '-'         |    '--------'         '-'       '------'   |
+*             - ^          |                      + ^                   |
+*               |          |    .--------.          |                   |
+*               |           '-->| Kp × s +---------'                    |
+*               |               '--------'                              |
+*                '-----------------------------------------------------'
+*
+***********************************************************************************
+[Figure [pidDiagramLaplace]: Illustration of a classical PID controller in Laplace domain in the case of a linear system.]
+
+## Implementation on a Sampled-Data System
+
+When dealing with control theory in the real-world, chances are high
+that one will have to implement a particular controller on some sort
+of digital device. Digital computers are inherent sampled-data systems:
+they obtain read and write at a finite (fixed) frequency (more on this
+in the article on [Discretization](../discretization/index.html)).
+
+Besides the limitation on the sampling and write frequency, computers
+will also require more time to process complex instructions. When time
+is of the essence, and some degree of error is permissible, we would
+then like to make our control algorithms as simple and efficient as
+possible. The benefits of doing so are two-fold: (a) simpler and more
+understandable implementation for software engineers and control
+engineers alike; (b) lower computational costs enables higher process
+rates or the use of cheaper (legacy) hardware.
+
+Summarizing the discussion above, we would like to develop simple and
+efficient control algorithms, at the penalty of incurring
+(discretization) errors. We present the simplest of such discretized PID
+algorithms in the following sections.
+
+### Backward Differencing and Forward Euler Algorithm
+
+While we can exactly compute the proportional component of the control
+input ($P(t) = K_p e(t)$), we cannot exactly integrate nor differentiate
+the error signal on account of our finite sampling and computation rate.
+The simplest approximation to these exact operations is then to use a
+_finite difference_ method to obtain (an approximation to) the
+derivative of $e(t)$, and a _numerical quadrature_ method to obtain
+the integral.
+
+The simplest finite difference scheme that we can apply is the
+_backward difference_ scheme. Consider that we have the current
+error value $e(t)$ and the error value that was last sampled, at time
+interval $\Delta t > 0$ ago. We can then approximate the derivative of
+$e$ at $t$ as follows (this can be shown using a truncated Taylor series
+expansion with Lagrangian remainder):
+\begin{equation}
+    D(t) = K_d \frac{\text{d} e(t)}{\text{d}t} = K_d \frac{e(t) - e(t - \Delta t)}{\Delta t} + \mathcal{O}(\Delta t)
+\end{equation}
+
+Moving on, the integral of $e$ at $t$ can be approximated using a
+forward Euler scheme as follows
+\begin{equation}
+    I(t) = I(t - \Delta t) + K_i \int_{t - \Delta t}^{t} e(\tau) \ \text{d}\tau = I(t - \Delta t) + K_i e(t) \Delta t + \mathcal{O}(\Delta t^2).
+\end{equation}
+
+Putting everything together and accepting truncation errors, we obtain:
+
+\begin{align}\label{eq:simple discrete PID}
+    P(t) &= K_p e(t), \\
+    I(t) &= I(t - \Delta t) + K_i e(t) \Delta t, \\
+    D(t) &= K_d \frac{e(t) - e(t - \Delta t)}{\Delta t}, \\
+    u(t) &= P(t) + I(t) + D(t).
+\end{align}
+
+We can express this PID scheme by the pseudocode given in Listing [pidAlgoSimple].
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ C
+void function pid
+{
+    set last_integral to zero;
+    set last_error to zero;
+    set last_time to zero;
+
+    set Kp, Ki, Kd to desired gains;
+
+    while (controller_is_running()) {
+        time = get_time();
+
+        state = get_state(time);
+        reference = get_reference(time);
+        error = reference - state;
+
+        // Proportional
+        P = Ki * error;
+        
+        // Integral
+        I = last_integral + Ki * error;
+
+        // Derivative
+        D = Kd * (error - last_error) / (time - last_time);
+
+        control = P + I + D;
+        set_control(control);
+
+        last_error = error;
+        last_integral = I;
+    }
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[Listing [pidAlgoSimple]: Pseudocode of a simple PID algorithm]
+
+### More Accurate Algorithms
+
+**Future work:** Add section on adaptive backward differencing with
+FIFO stack, as well as adaptive quadrature schemes. Discuss implications
+on storage requirements and computational complexity. Discuss utility of
+filters in conditioning $y$.
+
+* * *
+
+[^pidAbbrev] Proportional-integral-derivative controller. 
+
+[^trackingCaveat] This simple transformation only works when the
+underlying plant is _linear_; particular caution must be exercised when
+applying this "trick" on nonlinear systems.
+
+**Bibliography**:
+[#Grabbe58]: E. M. Grabbe, S. Ramo, D. E. Wooldridge,
+_Handbook of Automation, Computation, and Control: Control Fundamentals_, Los Angeles, CA:
+Wiley, 1958.
+
+<link rel="stylesheet" href="../latex.css?">
+<!-- Markdeep: -->
+<style class="fallback">
+    body {
+        visibility: hidden
+    }
+</style>
+<script src="../markdeep.min.js?" charset="utf-8"></script>
