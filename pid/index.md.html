@@ -41,10 +41,10 @@ to Fig. [pidDiagram] to see how the different elements slot together.
 
 ### Regulators vs. Tracking Controllers
 
-A PID controller is in its raw form is a _regulator_: it serves to drive
-whatever signal is input to zero by exerting a computed control action
-onto the plant (or system). In practice, we often wish to _track_ a
-given _reference signal_, which we denote by $r(t)$. To express a
+A PID controller is in its raw form is a _regulator_: it serves to reject the
+effect of any disturbance signal by exerting a computed control action onto the
+plant (or system) to drive its output to zero. In practice, we often wish to
+_track_ a given _reference signal_, which we denote by $r(t)$. To express a
 tracking problem as a regulation problem, it suffices to apply the
 following transformation[^trackingCaveat]:
 
@@ -397,7 +397,7 @@ void function pid
         P = Ki * error;
         
         // Integral
-        I = last_integral + Ki * error;
+        I = last_integral + Ki * error * (time - last_time);
 
         // Derivative
         D = Kd * (error - last_error) / (time - last_time);
