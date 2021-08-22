@@ -394,7 +394,7 @@ void function pid
         error = reference - state;
 
         // Proportional
-        P = Ki * error;
+        P = Kp * error;
         
         // Integral
         I = last_integral + Ki * error * (time - last_time);

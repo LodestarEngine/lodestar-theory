@@ -1,0 +1,28 @@
+<html>
+	<head>
+		<meta charset="utf-8">
+	
+        <link rel="stylesheet" type="text/css" href="https://storage.googleapis.com/app.klipse.tech/css/codemirror.css">
+
+        <script>
+            window.klipse_settings = {
+                selector_eval_js: '.language-klipse-eval-js', // css selector for the html elements you want to klipsify
+                selector_eval_python_client: '.language-klipse-python', // css selector for the html elements you want to klipsify
+            };
+        </script>
+    </head>
+    <body>
+<code class="language-klipse-python">
+def factorial(n):
+    if n == 0:
+        return 1
+    else:
+        return n * factorial(n - 1)
+
+print(factorial(5))
+</code>
+
+    <script src="https://storage.googleapis.com/app.klipse.tech/plugin_prod/js/klipse_plugin.min.js"></script>
+
+    </body>
+</html>
